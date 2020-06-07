@@ -10,11 +10,12 @@ PASSWORD="$2"
 
 COORDINATOR_IP=192.168.66.101
 COORDINATOR_PORT=8001
-NC_TIMEOUT=3
+NC_TIMEOUT=5
 ERROR_RETRY_TIMES=10
-START_RETYR_TIMES=$[1 * 5]     # 5 minites
+START_RETYR_TIMES=$[1 * 5]     # 5 seconds
 START_COORDINATOR_ONLY=1
 START_COORDINATOR_AND_ALL_PARTICIPANTS=2
+START_FIRST_PARTICIPANT_ONLY=3
 
 DELAY=100 						   # ms
 PACKET_LOSS_RATE=10 			   # percentage
@@ -163,7 +164,7 @@ function check_background_process_start_status
 function language_checking
 {
 	echo "Language checking......"
-	java_file_counter=`ls -1 ${LAB3_ABSOLUTE_PATH}/*.java 2>/dev/null | wc -l`
+	java_file_counter=`ls -1 ${LAB3_ABSOLUTE_PATH}/*.java ${LAB3_ABSOLUTE_PATH}/*.jar 2>/dev/null | wc -l`
 	jar_file_counter=`ls -1 ${LAB3_ABSOLUTE_PATH}/kvstore2pcsystem.jar 2>/dev/null | wc -l`
 	c_file_counter=`ls -1 ${LAB3_ABSOLUTE_PATH}/*.c 2>/dev/null | wc -l`
 	cpp_file_counter=`ls -1 ${LAB3_ABSOLUTE_PATH}/*.cc ${LAB3_ABSOLUTE_PATH}/*.cpp ${LAB3_ABSOLUTE_PATH}/*.hpp 2>/dev/null | wc -l`
@@ -217,9 +218,14 @@ function run_kvstore2pcsystem_c_and_other_language_robustly
 	
 	for (( i=0; i<$START_RETYR_TIMES; i++ ))
 	do
+		if [[ $1 -eq $START_FIRST_PARTICIPANT_ONLY ]]
+		then
+			break
+		fi
 		${LAB3_ABSOLUTE_PATH}/kvstore2pcsystem --config_path ${coordinator_config_path} &
 		check_background_process_start_status $!
 		retval=$?
+		sleep 0.5
 
 		if [[ $retval -eq 0 ]]
 		then
@@ -263,6 +269,10 @@ function run_kvstore2pcsystem_c_and_other_language_robustly
 				echo "Run participant[$i] failed"
 				return $FAIL
 			fi
+			if [[ $1 -eq $START_FIRST_PARTICIPANT_ONLY ]]
+			then
+				break
+			fi
 		done
 	else
 		echo "Run coordinator failed"
@@ -280,9 +290,14 @@ function run_kvstore2pcsystem_java_robustly
 
 	for (( i=0; i<$START_RETYR_TIMES; i++ ))
 	do
+		if [[ $1 -eq $START_FIRST_PARTICIPANT_ONLY ]]
+		then
+			break
+		fi
 		java -jar ${LAB3_ABSOLUTE_PATH}/kvstore2pcsystem.jar --config_path ${coordinator_config_path} &
 		check_background_process_start_status $!
 		retval=$?
+		sleep 0.5
 
 		if [[ $retval -eq 0 ]]
 		then
@@ -326,6 +341,10 @@ function run_kvstore2pcsystem_java_robustly
 				echo "Run participant[$i] failed"
 				return $FAIL
 			fi
+			if [[ $1 -eq $START_FIRST_PARTICIPANT_ONLY ]]
+			then
+				break
+			fi
 		done
 	else
 		echo "Run coordinator failed"
@@ -342,9 +361,14 @@ function run_kvstore2pcsystem_python_robustly
 
 	for (( i=0; i<$START_RETYR_TIMES; i++ ))
 	do
+		if [[ $1 -eq $START_FIRST_PARTICIPANT_ONLY ]]
+		then
+			break
+		fi
 		python3 ${LAB3_ABSOLUTE_PATH}/kvstore2pcsystem.py --config_path ${coordinator_config_path} &
 		check_background_process_start_status $!
 		retval=$?
+		sleep 0.5
 
 		if [[ $retval -eq 0 ]]
 		then
@@ -387,6 +411,10 @@ function run_kvstore2pcsystem_python_robustly
 				echo "Run participant[$i] failed"
 				return $FAIL
 			fi
+			if [[ $1 -eq $START_FIRST_PARTICIPANT_ONLY ]]
+			then
+				break
+			fi
 		done
 	else
 		echo "Run coordinator failed"
@@ -403,12 +431,19 @@ function run_kvstore2pcsystem_robustly
 
 	programing_language=$?
 
+	# Do make if there's a makefile regardless of in what language the system is written.
+	if [ -f ${LAB3_ABSOLUTE_PATH}/Makefile ] || [ -f ${LAB3_ABSOLUTE_PATH}/makefile ]
+	then
+		do_make
+	fi
+
 	# other language
 	if [ $programing_language -eq $UNKNOWN_LANGUAGE ]
 	then
 		echo "Start system: [ UNKNOWN LANGUAGE ]"
 		run_kvstore2pcsystem_c_and_other_language_robustly $1
 		retval=$?
+
 		if [ $retval -eq $SUCCESS ]
 		then
 			return $SUCCESS
@@ -420,7 +455,6 @@ function run_kvstore2pcsystem_robustly
 	# c or c++
 	if [ $programing_language -eq $C_OR_CPP ]
 	then
-		do_make
 		retval=$?
 		if [ $retval -eq $SUCCESS ]
 		then
@@ -494,9 +528,22 @@ function kill_coordinator_and_all_participants
 	done
 }
 
+function kill_coordinator
+{
+	kill -9 ${coordinator_pid}
+}
+
 function kill_one_of_participants
 {
 	kill -9 ${participants_pid[0]}
+}
+
+function kill_two_of_participants
+{
+	for (( i=1; i<3; i++ ))
+	do
+		kill -9 ${participants_pid[i]}
+	done	
 }
 
 function kill_all_participants
@@ -543,14 +590,14 @@ function send_set_command
 
 	    if [[ $retval_set =~ $standard_error ]]
 	    then
-	    	usleep 500
+	    	sleep 0.5
 	    	continue
 	    else
 	    	break
 	    fi
 	done
 
-	printf -v set_result "${retval_set}"
+	printf -v set_result "%s" "${retval_set}"
 }
 
 get_result=""
@@ -566,14 +613,36 @@ function send_get_command
 
 	    if [[ $retval_get =~ $standard_error ]]
 	    then
-	    	usleep 500
+	    	sleep 0.5
 	    	continue
 	    else
 	    	break
 	    fi
 	done
 
-	printf -v get_result "$retval_get"
+	printf -v get_result "%s" "$retval_get"
+}
+
+function send_get_command_ultimate_version
+{
+	key_len=$1
+	key=$2
+
+	printf -v get_command "*2\r\n\$3\r\nGET\r\n\$${key_len}\r\n${key}\r\n"
+	for (( i=0; i<$ERROR_RETRY_TIMES; i++ ))
+	do
+		retval_get=`printf "$get_command" | nc -w ${NC_TIMEOUT} 192.168.66.202 8003`
+
+	    if [[ $retval_get =~ $standard_error ]]
+	    then
+	    	sleep 0.5
+	    	continue
+	    else
+	    	break
+	    fi
+	done
+
+	printf -v get_result "%s" "$retval_get"
 }
 
 del_1_result=""
@@ -589,14 +658,14 @@ function send_del_command_1
 
 	    if [[ $retval_del1 =~ $standard_error ]]
 	    then
-	    	usleep 500
+	    	sleep 0.5
 	    	continue
 	    else
 	    	break
 	    fi
 	done
 
-	printf -v del_1_result "$retval_del1"
+	printf -v del_1_result "%s" "$retval_del1"
 }
 
 del_2_result=""
@@ -613,14 +682,14 @@ function send_del_command_2
 
 	    if [[ $retval_del2 =~ $standard_error ]]
 	    then
-	    	usleep 500
+	    	sleep 0.5
 	    	continue
 	    else
 	    	break
 	    fi
 	done
 
-	printf -v del_2_result "$retval_del2"
+	printf -v del_2_result "%s" "$retval_del2"
 }
 
 
@@ -633,7 +702,7 @@ function set_tag
 	echo "                                       \|/                                   "
 }
 
-printf -v standard_error ".ERROR\r"
+printf -v standard_error "%s\r" "-ERROR"
 printf -v standard_ok "+OK\r"
 printf -v standard_nil "*1\r\n\$3\r\nnil\r"
 
@@ -838,12 +907,71 @@ function test_item9
 
 	send_get_command 9 item9_key
 
-	if [[ $get_result = $standard_item9 ]]
+	if [[ $get_result =~ $standard_item9 ]]
 	then
 		echo "============================ [PASSED] : Test item 9 ============================"
 		return $PASSED
 	else
 		echo "============================ [FAILED] : Test item 9 ============================"
+		return $FAILED
+	fi
+
+}
+
+
+# ######################## extreme version ########################
+
+printf -v standard_item10 "*1\r\n\$20\r\nitem10_key_2_value_2\r"
+function test_item10
+{
+	set_tag
+	echo "---------------------------------- Test item 10 ----------------------------------"
+	echo "Test item 10. Test point: extreme version test."
+
+	send_set_command 12 item10_key_1 20 item10_key_1_value_1
+	send_set_command 12 item10_key_2 20 item10_key_2_value_2
+	kill_one_of_participants
+	kill_and_restart_coordinator_robustly
+	run_kvstore2pcsystem_robustly $START_FIRST_PARTICIPANT_ONLY
+	sleep 10
+	kill_two_of_participants
+
+	send_get_command 12 item10_key_2
+
+	if [[ $get_result = $standard_item10 ]]
+	then
+		echo "============================ [PASSED] : Test item 10 ============================"
+		return $PASSED
+	else
+		echo "============================ [FAILED] : Test item 10 ============================"
+		return $FAILED
+	fi
+
+}
+
+
+# ######################## ultimate version ########################
+
+
+printf -v standard_item11 "*1\r\n\$20\r\nitem11_key_2_value_2\r"
+function test_item11
+{
+	set_tag
+	echo "---------------------------------- Test item 11 ----------------------------------"
+	echo "Test item 11. Test point: ultimate version test."
+
+	send_set_command 12 item11_key_1 20 item11_key_1_value_1
+	send_set_command 12 item11_key_2 20 item11_key_2_value_2
+	kill_coordinator
+
+	send_get_command_ultimate_version 12 item11_key_2
+
+	if [[ $get_result = $standard_item11 ]]
+	then
+		echo "============================ [PASSED] : Test item 11 ============================"
+		return $PASSED
+	else
+		echo "============================ [FAILED] : Test item 11 ============================"
 		return $FAILED
 	fi
 
@@ -880,6 +1008,10 @@ function cloud_roll_up
 	TEST_RESULT_ARR[8]=$?
 	test_item9
 	TEST_RESULT_ARR[9]=$?
+	test_item10
+	TEST_RESULT_ARR[10]=$?
+	test_item11
+	TEST_RESULT_ARR[11]=$?
 
 	echo "---------------------------------- Global test done ----------------------------------"
 }
@@ -893,7 +1025,7 @@ function clean_up
 function show_test_result
 {
 	echo "Language: [${TEST_RESULT_ARR[0]}]"
-	for (( i=1; i<10; i++ ))
+	for (( i=1; i<12; i++ ))
 	do
 		if [[ ${TEST_RESULT_ARR[i]} -eq $PASSED ]]
 		then
@@ -919,4 +1051,3 @@ prepare_test_env
 cloud_roll_up
 clean_up
 show_test_result
-
